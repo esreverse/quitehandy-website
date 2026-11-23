@@ -9,8 +9,8 @@ Website of the Mac app Quite Handy, served by GitHub Pages at https://quitehandy
 `scripts/publish.sh` in the app's repo writes the appcast, the changelog and the release data
 here, commits and pushes. The DMGs are releases of this repo, tagged `quitehandy-v<version>`.
 
-www.esreverse.com/quitehandy forwards here. Its appcast stays there for installs of 2.3 and
-earlier, which read the feed from esreverse.com.
+www.esreverse.com/quitehandy forwards here. Its appcast stays there for installs of 1.7.0 to
+2.3, which read the feed from esreverse.com.
 
 
 
