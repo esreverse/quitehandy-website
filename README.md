@@ -1,4 +1,4 @@
-# quitehandy-site
+# quitehandy-website
 
 Website of the Mac app Quite Handy, served by GitHub Pages at https://quitehandy.app.
 
