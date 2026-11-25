@@ -15,6 +15,8 @@ import '@fontsource-variable/playpen-sans/wght.css';
 import '@fontsource/roboto-mono/400.css';
 import '@fontsource/roboto-mono/500.css';
 import '@fontsource/roboto-mono/700.css';
+import '@fontsource/fredoka/latin-400.css'; // the documents on the sheets
+import '@fontsource/fredoka/latin-600.css';
 import '@fontsource/fredoka/latin-700.css'; // the app's name, as in its logo
 import { getImage } from 'astro:assets';
 import Base from '../layouts/Base.astro';
@@ -174,12 +176,12 @@ const hands: HandChoice[] = await Promise.all(
       </section>
 
       <section class="step step--hand">
-        <h2 class="step__title"><span>And you need a hand to point out some things.</span></h2>
+        <h2 class="step__title"><span>And you need a hand to talk about things on your screen.</span></h2>
       </section>
 
       <section class="step step--sheet">
         <Sheet feature="draw" hint="Draw something now">
-          <h2 class="sheet-title" slot="title"><span>Imagine you could draw anywhere on your screen.</span></h2>
+          <h2 class="sheet-title" slot="title"><span>Imagine you could draw anywhere.</span></h2>
           <Fragment slot="shortcut">In the app: Hold and drag to draw · <kbd>⌃⇥</kbd> turns the pointer on and off</Fragment>
         </Sheet>
       </section>
@@ -200,14 +202,28 @@ const hands: HandChoice[] = await Promise.all(
       </section>
 
       <section class="step step--sheet">
+        <Sheet feature="emoji" hint="Click to stamp emojis now, hold to make them bigger">
+          <h2 class="sheet-title" slot="title"><span>Or say what you think with an emoji.</span></h2>
+          <Fragment slot="shortcut">In the app: Press <kbd>E</kbd> and click · hold to make it bigger</Fragment>
+        </Sheet>
+      </section>
+
+      <section class="step step--sheet">
+        <Sheet feature="pixelate" hint="Drag over anything you want to hide now">
+          <h2 class="sheet-title" slot="title"><span>Some things are better kept to yourself.</span></h2>
+          <Fragment slot="shortcut">In the app: Click Pixelate on a whiteboard and drag</Fragment>
+        </Sheet>
+      </section>
+
+      <section class="step step--sheet">
         <Sheet feature="zoom" hint="Hover to zoom anywhere on the screen">
-          <h2 class="sheet-title" slot="title"><span>Or take a closer look at everything on your screen.</span></h2>
+          <h2 class="sheet-title" slot="title"><span>Sometimes you need to take a closer look.</span></h2>
           <Fragment slot="shortcut">In the app: Hold <kbd>⇥</kbd> · turn on the zoom loupe in Settings first</Fragment>
         </Sheet>
       </section>
 
       <section class="step">
-        <h2 class="step__title"><span>Or OCR scan text from your screen, take screenshots or create screencasts.</span></h2>
+        <h2 class="step__title"><span>And from time to time you need to pick colors, check contrasts, copy text, take screenshots and create screencasts.</span></h2>
       </section>
 
       <section class="step step--outro" aria-labelledby="outro-title">
@@ -323,6 +339,7 @@ const hands: HandChoice[] = await Promise.all(
   const img = document.querySelector<HTMLImageElement>('[data-hand]');
   const body = document.querySelector<HTMLElement>('[data-hand-body]');
   const trigger = document.querySelector<HTMLElement>('.step--hand .step__title');
+  const emojiSheet = document.querySelector<HTMLElement>('[data-sheet="emoji"]');
   const outro = document.querySelector<HTMLElement>('.step--outro');
   const root = document.documentElement;
   const canFollow = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -368,27 +385,6 @@ const hands: HandChoice[] = await Promise.all(
       window.dispatchEvent(new CustomEvent('quitehandy:hand', { detail: { ...chosen.dataset } }));
     }
 
-    // Tap ripple, as in the app (ArmView.ripple): a filled circle in the ink
-    // colour, radius 40px, grows from 0.35x to 3x and fades out in 0.8s.
-    const ripple = (x: number, y: number) => {
-      if (reduced) return;
-      const dot = document.createElement('div');
-      dot.className = 'tap-ripple';
-      dot.style.left = `${x}px`;
-      dot.style.top = `${y}px`;
-      document.body.append(dot);
-      dot.animate([{ scale: 0.35 }, { scale: 3 }], {
-        duration: 800,
-        easing: 'cubic-bezier(0.15, 0.55, 0.4, 1)',
-        fill: 'both',
-      });
-      dot.animate([{ opacity: 1 }, { opacity: 0 }], {
-        duration: 800,
-        easing: 'cubic-bezier(0.33, 1, 0.68, 1)', // alpha drops fast, then trails off
-        fill: 'both',
-      }).finished.then(() => dot.remove());
-    };
-
     if (canFollow) {
       // Mouse: the hand follows the pointer everywhere. Browsers only report the
       // position with an event; besides moves, take it from wheel/trackpad
@@ -419,8 +415,6 @@ const hands: HandChoice[] = await Promise.all(
       { passive: true },
     );
 
-    let downAt: { x: number; y: number } | null = null;
-
     window.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       const onSheet = !!(e.target as Element | null)?.closest?.('[data-sheet]');
@@ -432,18 +426,11 @@ const hands: HandChoice[] = await Promise.all(
       if (root.hasAttribute('data-hand-following') || touchActive) {
         held = true;
         press = 1;
-        downAt = { x: e.clientX, y: e.clientY };
       }
     });
 
     const release = (e: PointerEvent) => {
       held = false;
-      if (e.type === 'pointerup' && downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5) {
-        // placing a number stamp is not a plain tap: no ripple there
-        const onStampSheet = (e.target as Element | null)?.closest?.('[data-sheet="stamp"]');
-        if (!onStampSheet) ripple(e.clientX, e.clientY);
-      }
-      downAt = null;
       if (touchActive && isTouch(e)) {
         touchActive = false;
         pointer = null; // back to the corner
@@ -452,7 +439,30 @@ const hands: HandChoice[] = await Promise.all(
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
 
-    const frame = () => {
+    // Other hands every time the toolbar comes back: all of them, with a new one in hand, while
+    // the hand is out of sight; only the toolbar's other ones if the hand stayed on screen.
+    const TOOLBAR_OUT = 500; // the toolbar's way out, see HandToolbar.astro
+    let toolbarShown = false;
+    let everShown = false;
+    let hiddenSince = 0; // when the hand went out of sight (0: on screen)
+    let fresh = false;
+    const shuffle = (keepHand: boolean) =>
+      window.dispatchEvent(new CustomEvent('quitehandy:shuffle', { detail: { keepHand } }));
+    const renewHands = (now: number, shown: boolean, handHidden: boolean) => {
+      if (shown && !toolbarShown) {
+        if (everShown && !fresh) shuffle(true);
+        everShown = true;
+        fresh = false;
+      }
+      toolbarShown = shown;
+      hiddenSince = handHidden ? hiddenSince || now : 0;
+      if (everShown && !fresh && hiddenSince && now - hiddenSince > TOOLBAR_OUT) {
+        shuffle(false);
+        fresh = true;
+      }
+    };
+
+    const frame = (now: number) => {
       // arrived once the hand has risen, i.e. shortly after the headline passed the centre
       const line = trigger.getBoundingClientRect();
       const arrived = line.top + line.height / 2 < window.innerHeight * 0.28;
@@ -462,6 +472,13 @@ const hands: HandChoice[] = await Promise.all(
       root.toggleAttribute('data-toolbar', arrived && !outroReached);
       // At the download the hand goes and the normal pointer is back, for the link and the notes.
       root.toggleAttribute('data-hand-away', outroReached);
+      // on the emoji sheet the toolbar shows emojis
+      const emojiBox = emojiSheet?.getBoundingClientRect();
+      const onEmojis = !!emojiBox && emojiBox.top < window.innerHeight * 0.6 && emojiBox.bottom > window.innerHeight * 0.4;
+      if (onEmojis) root.dataset.tool = 'emoji';
+      else delete root.dataset.tool;
+      // below its headline's centre the hand has not risen yet
+      renewHands(now, arrived && !outroReached, outroReached || line.top + line.height / 2 > window.innerHeight * 0.5);
       const following = arrived && !outroReached && pointer !== null && (canFollow || touchActive);
       root.toggleAttribute('data-hand-following', following);
 
@@ -562,18 +579,6 @@ const hands: HandChoice[] = await Promise.all(
     }
   }
 */
-
-  /* Tap ripple (created by the script): above the sheets and toolbar, below the hand */
-  :global(.tap-ripple) {
-    position: fixed;
-    z-index: 2;
-    width: 80px;
-    height: 80px;
-    margin: -40px 0 0 -40px;
-    border-radius: 50%;
-    background: #ff3b30; /* the page's ink colour */
-    pointer-events: none;
-  }
 
   /* Over the zoom sheet the hand turns into the loupe. */
   :global(html[data-hand-loupe]) .hand-layer {

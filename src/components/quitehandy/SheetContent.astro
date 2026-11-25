@@ -1,15 +1,23 @@
 ---
 /**
  * The "document" on a sheet: black-and-white wireframes of real use cases
- * (a presentation, a chart, a welcome flow), so the visitor
+ * (a presentation, a chart, a welcome flow, a chat), so the visitor
  * draws, points and stamps on something. Purely decorative: the ink canvas
  * lies on top and takes all input. Sizes in cqi scale with the sheet.
  */
 interface Props {
-  feature: 'draw' | 'rainbow' | 'stamp';
+  feature: 'draw' | 'rainbow' | 'stamp' | 'emoji';
   hint: string;
 }
 const { feature, hint } = Astro.props;
+
+const chat = [
+  { name: 'Client', text: 'Can you make the logo bigger?' },
+  { name: 'Me', text: 'Sure, how much bigger?' },
+  { name: 'Client', text: 'Yes.' },
+  { name: 'Client', text: 'And can we go back to version 1?' },
+  { name: 'Me', text: 'Love it.' },
+];
 
 const bars = [
   { label: 'Jan', h: 28 },
@@ -23,6 +31,7 @@ const bars = [
 
 <div class:list={['page', `page--${feature}`]} aria-hidden="true">
   <div class="page__body">
+    <canvas class="page__wires" />
     {
       feature === 'draw' && (
         <div class="slide">
@@ -113,6 +122,19 @@ const bars = [
         </div>
       )
     }
+
+    {
+      feature === 'emoji' && (
+        <div class="chat">
+          {chat.map(({ name, text }) => (
+            <p class:list={['chat__message', { 'chat__message--me': name === 'Me' }]}>
+              <span class="chat__name">{name}</span>
+              <span class="chat__bubble">{text}</span>
+            </p>
+          ))}
+        </div>
+      )
+    }
   </div>
 
   <div class="page__foot">
@@ -137,6 +159,8 @@ const bars = [
     gap: 2.5cqi;
     padding: 5.5cqi 6.5cqi 3cqi;
     color: var(--color-black);
+    font-family: 'Fredoka', var(--font-sans, sans-serif);
+    font-variation-settings: normal;
     font-size: 1.9cqi;
     line-height: 1.35;
     user-select: none;
@@ -153,6 +177,22 @@ const bars = [
   .page__body {
     min-height: 0;
     opacity: 0.6;
+    position: relative;
+  }
+
+  /* The borders and bars drawn by hand (scribble.ts), with room for what strays over the edge;
+     the CSS ones are hidden then. */
+  .page__wires {
+    position: absolute;
+    z-index: -1;
+    inset: -8px;
+    width: calc(100% + 16px);
+    height: calc(100% + 16px);
+  }
+
+  .page[data-scribbled] .page__body * {
+    border-color: transparent;
+    background: none;
   }
 
   .page__foot {
@@ -180,18 +220,20 @@ const bars = [
   /* --- shared wireframe parts --- */
   .kicker {
     font-size: 0.8em;
-    font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    opacity: 0.5;
   }
 
   .title {
     margin-top: 0.6cqi !important;
     font-size: 4.4cqi;
     line-height: 1.1;
-    font-weight: 400;
+    font-weight: 600;
     letter-spacing: -0.02em;
+  }
+
+  .page--draw .title {
+    font-size: 5.6cqi;
   }
 
   /* image placeholder: a plain grey frame */
@@ -245,9 +287,9 @@ const bars = [
 
   .page--draw .slide {
     grid-template-columns: auto 1fr;
-    gap: 10cqi;
+    gap: 8cqi;
     height: auto;
-    padding-inline: 11.3cqi;
+    padding-inline: 9cqi;
   }
 
   .bullets {
@@ -313,7 +355,7 @@ const bars = [
   .stats__value {
     font-size: 5.6cqi;
     line-height: 1.1;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: -0.02em;
   }
 
@@ -412,7 +454,7 @@ const bars = [
   .phone__title {
     margin-top: 0.6cqi;
     font-size: 2.2cqi;
-    font-weight: 400;
+    font-weight: 600;
   }
 
   .cta {
@@ -425,5 +467,38 @@ const bars = [
     font-weight: 600;
   }
 
+  /* --- chat --- */
+  .chat {
+    display: grid;
+    align-content: center;
+    gap: 2cqi;
+    height: 100%;
+    padding-inline: 11.3cqi;
+    font-size: 2.2cqi;
+  }
 
+  .chat__message {
+    display: grid;
+    justify-items: start;
+    gap: 0.5cqi;
+  }
+
+  .chat__message--me {
+    justify-items: end;
+  }
+
+  .chat__name {
+    font-size: 0.7em;
+    opacity: 0.7;
+  }
+
+  .chat__bubble {
+    padding: 1.1cqi 2cqi;
+    border: var(--line);
+    border-radius: 2.4cqi;
+  }
+
+  .chat__message--me .chat__bubble {
+    background: var(--fill);
+  }
 </style>

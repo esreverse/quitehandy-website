@@ -5,22 +5,42 @@
  *   draw     – drag to draw a line
  *   rainbow  – drag to draw a line that runs through every colour
  *   stamp    – click to put down numbered circles 1, 2, 3 …
+ *   emoji    – click to stamp the toolbar's emoji, hold to make it bigger
+ *   pixelate – drag over something to pixelate it
  *   zoom     – the hand turns into a 3× loupe over the sheet
  *
  * Strokes are stored in sheet-relative units (fractions of the sheet width),
  * so they survive resizes. The sheet itself clips the canvas.
  */
 
-type Feature = 'draw' | 'rainbow' | 'stamp' | 'zoom';
+import { scribblePage, scribblePath, straight } from './scribble';
+
+type Feature = 'draw' | 'rainbow' | 'stamp' | 'emoji' | 'pixelate' | 'zoom';
 type Point = { x: number; y: number; hue: number };
 type Stroke =
   | { kind: 'line'; rainbow: boolean; points: Point[] }
-  | { kind: 'stamp'; x: number; y: number; n: number };
+  | { kind: 'stamp'; x: number; y: number; n: number }
+  | { kind: 'emoji'; x: number; y: number; emoji: string; from: number; size: number; since: number };
 
 const INK = '#ff3b30';
 const LINE_WIDTH = 6; // px at the sheet's current size … scaled by REF_WIDTH
 const REF_WIDTH = 880; // sheet width the sizes above are designed for
 const STAMP_RADIUS = 22;
+/** Number stamps as the app's Automatic: black in light mode, white in dark mode, 90 % opaque. */
+const STAMP_COLORS = { light: { circle: '#1d1d21', number: '#fff' }, dark: { circle: '#fff', number: '#1d1d21' } };
+const STAMP_OPACITY = 0.9;
+/** The app's number font. */
+const STAMP_FONT = '"Fredoka"';
+/** Emoji stamps as in the app: while held they step through these sizes, each step eased. */
+const EMOJI_SIZES = [42, 96, 160];
+const EMOJI_CYCLE = [0, 1, 2, 1];
+const EMOJI_STEP_MS = 500;
+const EMOJI_EASE_MS = 250;
+const EMOJI_MIN = 32; // px, so the smallest stays readable on small screens
+const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+const PIXEL_BLOCK = 16;
+const PIXEL_BLOCK_MIN = 8;
+const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
 const RAINBOW_DEG_PER_PX = 0.35;
 /** Input smoothing: each new point moves this far towards the raw pointer (0..1, lower = smoother). */
 const SMOOTHING = 0.4;
@@ -28,7 +48,10 @@ const SMOOTHING = 0.4;
 export function initSheets() {
   for (const sheet of document.querySelectorAll<HTMLElement>('[data-sheet]')) {
     const feature = sheet.dataset.sheet as Feature;
+    const page = sheet.querySelector<HTMLElement>('.page');
+    if (page) scribblePage(page);
     if (feature === 'zoom') setUpLoupe(sheet);
+    else if (feature === 'pixelate') setUpPixelate(sheet);
     else setUpSheet(sheet, feature);
   }
 }
@@ -40,6 +63,8 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
   let current: Extract<Stroke, { kind: 'line' }> | null = null;
   let hue = 0;
   let stampCount = 0;
+  let growing = 0; // the timer while an emoji is held
+  let easing = 0; // the running animation frame
 
   // Size the backing store to the element (untransformed size × DPR).
   const resize = () => {
@@ -50,7 +75,10 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
   };
   new ResizeObserver(resize).observe(canvas);
   // the stamp font is only used on the canvas, so load it explicitly
-  if (feature === 'stamp') document.fonts.load('600 24px "Playpen Sans Variable"').then(redraw, () => {});
+  if (feature === 'stamp') {
+    document.fonts.load(`700 24px ${STAMP_FONT}`).then(redraw, () => {});
+    darkMode.addEventListener('change', redraw);
+  }
 
   /** Sheet width in CSS px, and the scale factor for line/stamp sizes */
   const width = () => canvas.offsetWidth || 1;
@@ -73,10 +101,39 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
       return;
     }
 
+    if (feature === 'emoji') {
+      stampEmoji(p, event.pointerId);
+      return;
+    }
+
     canvas.setPointerCapture(event.pointerId);
     current = { kind: 'line', rainbow: feature === 'rainbow', points: [p] };
     strokes.push(current);
   });
+
+  /** Puts down the toolbar's emoji; while the button stays down it grows and shrinks in steps. */
+  const stampEmoji = (p: Point, pointerId: number) => {
+    const emoji = document.querySelector<HTMLElement>('.toolbar__emoji[aria-pressed="true"]')?.dataset.emoji;
+    if (!emoji) return;
+    canvas.setPointerCapture(pointerId);
+    const [small] = EMOJI_SIZES;
+    const stamp = { kind: 'emoji' as const, x: p.x, y: p.y, emoji, from: small, size: small, since: 0 };
+    strokes.push(stamp);
+    redraw();
+    let step = 0;
+    clearInterval(growing);
+    growing = window.setInterval(() => {
+      stamp.from = stamp.size;
+      stamp.size = EMOJI_SIZES[EMOJI_CYCLE[++step % EMOJI_CYCLE.length]];
+      stamp.since = performance.now();
+      cancelAnimationFrame(easing);
+      const ease = (now: number) => {
+        redraw();
+        if (now - stamp.since < EMOJI_EASE_MS) easing = requestAnimationFrame(ease);
+      };
+      easing = requestAnimationFrame(ease);
+    }, EMOJI_STEP_MS);
+  };
 
   /** Adds one input sample to the current line, eased towards the raw pointer. */
   const addSample = (raw: Point) => {
@@ -105,6 +162,7 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
   });
 
   const end = () => {
+    clearInterval(growing);
     // let the smoothed line catch up with where the pointer was released
     if (current && lastRaw) for (let i = 0; i < 8; i++) addSample(lastRaw);
     if (current && current.points.length < 2) strokes.pop();
@@ -125,6 +183,7 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
 
     for (const stroke of strokes) {
       if (stroke.kind === 'stamp') drawStamp(stroke, w);
+      else if (stroke.kind === 'emoji') drawEmoji(stroke, w);
       else drawLine(stroke, w);
     }
   }
@@ -172,15 +231,34 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
 
   }
 
+  function drawEmoji(stamp: Extract<Stroke, { kind: 'emoji' }>, w: number) {
+    const t = Math.min(1, (performance.now() - stamp.since) / EMOJI_EASE_MS);
+    const size = stamp.from + (stamp.size - stamp.from) * (1 - (1 - t) ** 3);
+    // scales with the sheet, but stays big enough to see on small screens
+    const px = size * Math.max(unit(), EMOJI_MIN / EMOJI_SIZES[0]);
+    ctx.fillStyle = '#000'; // opaque, also where an emoji is drawn as text
+    ctx.font = `${px * 0.75}px ${EMOJI_FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const m = ctx.measureText(stamp.emoji);
+    ctx.fillText(
+      stamp.emoji,
+      stamp.x * w - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2,
+      stamp.y * w + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2,
+    );
+  }
+
   function drawStamp(stamp: Extract<Stroke, { kind: 'stamp' }>, w: number) {
     // scales with the sheet, but stays big enough to read on small screens
     const r = Math.max(STAMP_RADIUS * unit(), 16);
-    ctx.fillStyle = INK;
+    const colors = darkMode.matches ? STAMP_COLORS.dark : STAMP_COLORS.light;
+    ctx.globalAlpha = STAMP_OPACITY;
+    ctx.fillStyle = colors.circle;
     ctx.beginPath();
     ctx.arc(stamp.x * w, stamp.y * w, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = `600 ${Math.round(r * 1.15)}px "Playpen Sans Variable", sans-serif`;
+    ctx.fillStyle = colors.number;
+    ctx.font = `700 ${Math.round(r * 1.15)}px ${STAMP_FONT}, sans-serif`;
     // Centre the digits on their measured glyph box, not on a text baseline:
     // browsers place "middle" differently (Safari sat the digits ~2px low).
     const text = String(stamp.n);
@@ -194,7 +272,155 @@ function setUpSheet(sheet: HTMLElement, feature: Feature) {
     const x = cx - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2 + nudgeX;
     const y = cy + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
     ctx.fillText(text, x, y);
+    ctx.globalAlpha = 1;
   }
+}
+
+/**
+ * Pixelate sheet: the document is drawn on a canvas, so its own pixels can be averaged. Dragging
+ * pixelates a frame live, its blocks on a fixed grid, so they stay put while it grows.
+ */
+function setUpPixelate(sheet: HTMLElement) {
+  const canvas = sheet.querySelector<HTMLCanvasElement>('.sheet__secrets')!;
+  const ctx = canvas.getContext('2d')!;
+  // the document alone, and its blocks, one pixel each
+  const page = document.createElement('canvas');
+  const blocks = document.createElement('canvas');
+  type Frame = { x0: number; y0: number; x1: number; y1: number };
+  const frames: Frame[] = [];
+  let current: Frame | null = null;
+
+  const width = () => canvas.offsetWidth || 1;
+  const dpr = () => canvas.width / width();
+
+  const drawPage = () => {
+    page.width = canvas.width;
+    page.height = canvas.height;
+    const g = page.getContext('2d')!;
+    const scale = dpr();
+    const w = width();
+    const h = canvas.offsetHeight;
+    const font = (size: number, weight = 400) => `${weight} ${size}px "Fredoka", sans-serif`;
+    g.setTransform(scale, 0, 0, scale, 0, 0);
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, w, h);
+    g.textBaseline = 'middle';
+
+    // as the other sheets' wireframes: cqi sizes, soft greys
+    const cqi = w / 100;
+    const left = 17.8 * cqi;
+    const right = w - left;
+    const columns = [left, left + 24 * cqi, left + 44 * cqi];
+    const rowHeight = 6 * cqi;
+    const top = h / 2 - 22 * cqi;
+    g.fillStyle = 'rgb(0 0 0 / 0.6)';
+    g.font = font(1.52 * cqi);
+    g.fillText('CONFIDENTIAL', left, top);
+    g.font = font(4.4 * cqi, 600);
+    g.fillText('Please Do Not Share', left, top + 4 * cqi);
+
+    const rows = [
+      ['Name', 'Salary', 'Password'],
+      ['The boss', '$1,000,000', 'password123'],
+      ['The designer', '$4.20', 'PixelPerfect!'],
+      ['The developer', '$404', 'not found'],
+      ['The intern', 'Exposure', 'coffee2go'],
+    ];
+    const tableTop = top + 10 * cqi;
+    g.strokeStyle = 'rgb(0 0 0 / 0.33)';
+    g.lineWidth = 2;
+    rows.forEach((row, i) => {
+      const y = tableTop + i * rowHeight;
+      g.font = font(2.2 * cqi, i === 0 ? 600 : 400);
+      row.forEach((text, c) => g.fillText(text, columns[c], y + rowHeight / 2));
+      scribblePath(g, straight(left, y + rowHeight, right, y + rowHeight), i, 0.22 * cqi);
+      g.stroke();
+    });
+
+    const small = Math.max(10, 1.6 * cqi);
+    g.font = font(small);
+    g.fillStyle = 'rgb(0 0 0 / 0.55)';
+    g.textAlign = 'center';
+    g.fillText(sheet.dataset.hint ?? '', w / 2, h - 3 * cqi - small * 0.68);
+    g.textAlign = 'left';
+  };
+
+  let block = PIXEL_BLOCK; // canvas pixels
+
+  /** Every block's own average (a browser's shrinking skips pixels). */
+  const averageBlocks = () => {
+    block = Math.round(Math.max(PIXEL_BLOCK * (width() / REF_WIDTH), PIXEL_BLOCK_MIN) * dpr());
+    blocks.width = Math.ceil(page.width / block);
+    blocks.height = Math.ceil(page.height / block);
+    const source = page.getContext('2d')!.getImageData(0, 0, page.width, page.height).data;
+    const b = blocks.getContext('2d')!;
+    const image = b.createImageData(blocks.width, blocks.height);
+    for (let by = 0; by < blocks.height; by++) {
+      for (let bx = 0; bx < blocks.width; bx++) {
+        const right = Math.min((bx + 1) * block, page.width);
+        const bottom = Math.min((by + 1) * block, page.height);
+        let sum = 0; // the page is grey: one channel says it all
+        let count = 0;
+        for (let y = by * block; y < bottom; y++) {
+          for (let x = bx * block; x < right; x++) {
+            sum += source[(y * page.width + x) * 4];
+            count++;
+          }
+        }
+        const grey = sum / count;
+        image.data.set([grey, grey, grey, 255], (by * blocks.width + bx) * 4);
+      }
+    }
+    b.putImageData(image, 0, 0);
+  };
+
+  const redraw = () => {
+    ctx.drawImage(page, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    for (const f of current ? [...frames, current] : frames) {
+      ctx.save();
+      ctx.beginPath();
+      const px = (v: number) => v * canvas.width;
+      ctx.rect(px(Math.min(f.x0, f.x1)), px(Math.min(f.y0, f.y1)), px(Math.abs(f.x1 - f.x0)), px(Math.abs(f.y1 - f.y0)));
+      ctx.clip();
+      ctx.drawImage(blocks, 0, 0, blocks.width * block, blocks.height * block);
+      ctx.restore();
+    }
+  };
+
+  const resize = () => {
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(canvas.offsetWidth * ratio);
+    canvas.height = Math.round(canvas.offsetHeight * ratio);
+    if (!canvas.width || !canvas.height) return;
+    drawPage();
+    averageBlocks();
+    redraw();
+  };
+  new ResizeObserver(resize).observe(canvas);
+  Promise.all([400, 600].map((weight) => document.fonts.load(`${weight} 24px "Fredoka"`))).then(resize, () => {});
+
+  // fractions of the sheet's width, so the frames survive resizes
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    canvas.setPointerCapture(event.pointerId);
+    const x = event.offsetX / width();
+    const y = event.offsetY / width();
+    current = { x0: x, y0: y, x1: x, y1: y };
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!current) return;
+    current.x1 = event.offsetX / width();
+    current.y1 = event.offsetY / width();
+    redraw();
+  });
+  const end = () => {
+    if (current) frames.push(current);
+    current = null;
+    redraw();
+  };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
 }
 
 /** Rainbow colour for a hue; hue may exceed 360 (it keeps counting along the line). */

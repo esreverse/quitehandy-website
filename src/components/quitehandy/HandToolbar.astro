@@ -1,7 +1,8 @@
 ---
 /**
  * The pointer part of the QuiteHandy toolbar (as in the app, without colours
- * and sound): pick one of six hands, drawn from all of the app's hands with a stick on every visit. Appears once the hand is on screen.
+ * and sound): pick one of six hands, drawn from all of the app's hands with a stick on every visit and every time it comes back. Appears once the hand is on screen.
+ * On the emoji sheet (html[data-tool="emoji"], set by the page script) it shows emojis instead.
  * Selecting a hand dispatches `quitehandy:hand` with the image sources.
  */
 import { Image } from 'astro:assets';
@@ -24,9 +25,12 @@ interface Props {
   hands: HandChoice[];
 }
 const { hands } = Astro.props;
+
+const emojis = ['❤️', '👍', '😂', '🔥', '🎉', '👀', '🤔', '❌'];
 ---
 
-<div class="toolbar" role="toolbar" aria-label="Choose a hand" data-hand-toolbar>
+<div class="toolbar" data-hand-toolbar>
+<div class="toolbar__group toolbar__group--hands" role="toolbar" aria-label="Choose a hand">
   {
     hands.map((hand, i) => (
       <button
@@ -54,6 +58,22 @@ const { hands } = Astro.props;
     <span class="visually-hidden">Add your own hand</span>
   </button>
 </div>
+<div class="toolbar__group toolbar__group--emojis" role="toolbar" aria-label="Choose an emoji">
+  {
+    emojis.map((emoji, i) => (
+      <button
+        class="toolbar__emoji"
+        type="button"
+        aria-pressed={i === 0 ? 'true' : 'false'}
+        data-emoji={emoji}
+        data-cursor-grow
+      >
+        {emoji}
+      </button>
+    ))
+  }
+</div>
+</div>
 
 <RetroDialog id="own-hand" title="Make your own hand">
   <p>
@@ -76,25 +96,42 @@ const { hands } = Astro.props;
     toolbar?.querySelectorAll('.toolbar__hand').forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
     window.dispatchEvent(new CustomEvent('quitehandy:hand', { detail: { ...button.dataset } }));
   };
-  // Six of all the hands, picked anew on every visit, the first one in hand.
-  if (toolbar) {
+  // Six of all the hands, picked anew on every visit and every time the toolbar comes back, the
+  // first one in hand. `keepHand`: the one in hand stays, only the others change.
+  const shuffle = (keepHand = false) => {
+    if (!toolbar) return;
     const all = [...toolbar.querySelectorAll<HTMLButtonElement>('.toolbar__hand')];
+    const held = all.find((b) => b.getAttribute('aria-pressed') === 'true');
     for (let i = all.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [all[i], all[j]] = [all[j], all[i]];
     }
+    if (keepHand && held) {
+      const at = all.indexOf(held);
+      [all[0], all[at]] = [all[at], all[0]];
+    } else if (held && all[0] === held) {
+      // Out of sight and back: always another one.
+      [all[0], all[6]] = [all[6], all[0]];
+    }
     const divider = toolbar.querySelector('.toolbar__divider');
     all.forEach((b, i) => {
       b.hidden = i >= 6;
-      if (i < 6) toolbar.insertBefore(b, divider);
+      if (i < 6) divider?.before(b);
     });
     // The first one pressed: the page's script takes it into the hand once it runs.
     pick(all[0]);
-  }
+  };
+  shuffle();
+  window.addEventListener('quitehandy:shuffle', (event) =>
+    shuffle((event as CustomEvent<{ keepHand: boolean }>).detail.keepHand),
+  );
   toolbar?.addEventListener('click', (event) => {
     const button = (event.target as Element).closest<HTMLButtonElement>('.toolbar__hand');
-    if (!button) return;
-    pick(button);
+    if (button) pick(button);
+    const emoji = (event.target as Element).closest<HTMLButtonElement>('.toolbar__emoji');
+    if (emoji) {
+      toolbar.querySelectorAll('.toolbar__emoji').forEach((b) => b.setAttribute('aria-pressed', String(b === emoji)));
+    }
   });
 </script>
 
@@ -104,9 +141,10 @@ const { hands } = Astro.props;
     z-index: 2; /* below the hand, above the sheets */
     left: 50%;
     bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    display: grid;
+    /* on phones the buttons share the width there is */
+    width: max-content;
+    max-width: calc(100vw - 32px);
     padding: 6px;
     /* the app's own toolbar look (deliberately not retro) */
     border-radius: 16px;
@@ -127,10 +165,55 @@ const { hands } = Astro.props;
     opacity: 1;
   }
 
+  /* hands and emojis on top of each other, one of them showing */
+  .toolbar__group {
+    grid-area: 1 / 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    transition:
+      opacity 0.2s,
+      visibility 0.2s;
+  }
+
+  :global(html:not([data-tool='emoji'])) .toolbar__group--emojis,
+  :global(html[data-tool='emoji']) .toolbar__group--hands {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .toolbar__emoji {
+    display: grid;
+    place-items: center;
+    flex: 0 1 52px;
+    min-width: 0;
+    height: 52px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+    font-size: clamp(22px, 7vw, 30px);
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .toolbar__emoji:hover {
+    background: rgb(255 255 255 / 0.08);
+  }
+
+  .toolbar__emoji[aria-pressed='true'] {
+    background: rgb(255 255 255 / 0.18);
+  }
+
   .toolbar__hand {
     display: grid;
     place-items: center;
-    width: 52px;
+    flex: 0 1 52px;
+    min-width: 0;
     height: 52px;
     padding: 0;
     border: 0;
@@ -151,6 +234,7 @@ const { hands } = Astro.props;
   }
 
   .toolbar__divider {
+    flex: none;
     width: 1px;
     height: 32px;
     margin-inline: 4px;
@@ -160,7 +244,8 @@ const { hands } = Astro.props;
   .toolbar__add {
     display: grid;
     place-items: center;
-    width: 52px;
+    flex: 0 1 52px;
+    min-width: 0;
     height: 52px;
     padding: 0;
     border: 0;
@@ -188,5 +273,6 @@ const { hands } = Astro.props;
   .toolbar__hand :global(img) {
     width: 52px;
     height: 52px;
+    object-fit: cover;
   }
 </style>

@@ -3,11 +3,11 @@
  * A landscape sheet of paper in a classic black-and-white document window,
  * with the feature's headline above it (slot "title"). Each sheet unlocks its
  * feature: inside the sheet the visitor can try it with the hand (draw,
- * rainbow ink, number stamps, zoom loupe). The sheet clips the ink.
+ * rainbow ink, number stamps, emoji stamps, pixelate, zoom loupe). The sheet clips the ink.
  * Below the window: the shortcut that does the same in the app.
  */
 interface Props {
-  feature: 'draw' | 'rainbow' | 'stamp' | 'zoom';
+  feature: 'draw' | 'rainbow' | 'stamp' | 'emoji' | 'pixelate' | 'zoom';
   /** Call to action in the middle of the sheet (not shown on the zoom sheet) */
   hint: string;
 }
@@ -20,6 +20,8 @@ const windowTitles = {
   draw: 'brilliant presentation.pptx',
   rainbow: 'very informative diagram.pptx',
   stamp: 'very nice figma design.fig',
+  emoji: 'quick sync.chat',
+  pixelate: 'do not share.xlsx',
   zoom: 'bugs.png',
 };
 
@@ -41,6 +43,10 @@ const windowTitles = {
               <canvas class="loupe__ants" />
             </div>
           </div>
+        </article>
+      ) : feature === 'pixelate' ? (
+        <article class="sheet" data-sheet={feature} data-hint={hint}>
+          <canvas class="sheet__secrets" aria-hidden="true" />
         </article>
       ) : (
         <article class="sheet" data-sheet={feature}>
@@ -188,6 +194,7 @@ const windowTitles = {
     pointer-events: none;
   }
 
+  .sheet__secrets,
   .sheet__ink {
     position: absolute;
     inset: 0;
