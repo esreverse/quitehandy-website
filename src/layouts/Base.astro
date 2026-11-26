@@ -14,8 +14,8 @@ interface Props {
   ogImage?: string;
   /** Light-mode browser UI colour */
   themeColor?: string;
-  /** Own icon set for a page (favicon + apple-touch-icon), e.g. a product page */
-  icons?: { favicon: string; appleTouch: string };
+  /** Own icon set for a page (favicon, one for dark mode if it has one, apple-touch-icon), e.g. a product page */
+  icons?: { favicon: string; faviconDark?: string; appleTouch: string };
 }
 
 const {
@@ -50,7 +50,8 @@ const isPreview = import.meta.env.BASE_URL !== '/';
     {
       icons ? (
         <>
-          <link rel="icon" href={url(icons.favicon)} />
+          <link rel="icon" href={url(icons.favicon)} media={icons.faviconDark && '(prefers-color-scheme: light)'} />
+          {icons.faviconDark && <link rel="icon" href={url(icons.faviconDark)} media="(prefers-color-scheme: dark)" />}
           <link rel="apple-touch-icon" href={url(icons.appleTouch)} />
         </>
       ) : (
