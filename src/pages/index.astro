@@ -342,17 +342,36 @@ const hands: HandChoice[] = await Promise.all(
 </Base>
 
 <script>
-  // The trailer: a click swaps the thumbnail for YouTube's player, playing.
+  // The trailer: a click swaps the thumbnail for YouTube's player, playing, captions off
+  // (YouTube turns them on by itself depending on the viewer's settings and language).
   const trailer = document.querySelector<HTMLButtonElement>('.trailer');
   trailer?.addEventListener('click', () => {
-    const frame = document.createElement('iframe');
-    frame.src = `https://www.youtube-nocookie.com/embed/${trailer.dataset.video}?autoplay=1&rel=0&playsinline=1`;
-    frame.title = 'Quite Handy trailer';
-    frame.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
-    frame.allowFullscreen = true;
-    frame.referrerPolicy = 'strict-origin-when-cross-origin';
-    trailer.replaceChildren(frame);
+    const spot = document.createElement('div');
+    trailer.replaceChildren(spot);
     trailer.dataset.state = 'playing';
+    const start = () => {
+      const YT = (window as any).YT;
+      new YT.Player(spot, {
+        videoId: trailer.dataset.video,
+        width: '100%',
+        height: '100%',
+        playerVars: { autoplay: 1, rel: 0, playsinline: 1, cc_load_policy: 0 },
+        events: {
+          onReady: (e: any) => e.target.playVideo(),
+          onStateChange: (e: any) => {
+            if (e.data === 1) e.target.unloadModule('captions');
+          },
+        },
+      });
+    };
+    if ((window as any).YT?.Player) {
+      start();
+    } else {
+      (window as any).onYouTubeIframeAPIReady = start;
+      const api = document.createElement('script');
+      api.src = 'https://www.youtube.com/iframe_api';
+      document.head.append(api);
+    }
   }, { once: true });
 </script>
 
